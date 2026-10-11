@@ -293,6 +293,9 @@ app.post('/api/tts', async (req, res) => {
 // ==========================================
 // 4. MENU PARSE OCR (IIITH Sandbox API Integration)
 // ==========================================
+// ==========================================
+// 4. MENU PARSE OCR (IIITH Sandbox API Integration)
+// ==========================================
 app.post('/api/menu/parse', upload.single('image'), async (req, res) => {
   try {
     const ocrApiUrl = process.env.IIIT_OCR_API_URL || 'https://canvas.iiit.ac.in/sandboxbeprod/check_ocr_status_and_infer/687f420802ae0a1948845594';
@@ -300,7 +303,6 @@ app.post('/api/menu/parse', upload.single('image'), async (req, res) => {
 
     let ocrText = '';
 
-    // 1. Query the IIITH Canvas Sandbox OCR endpoint
     try {
       const response = await fetch(ocrApiUrl, {
         method: 'GET',
@@ -312,9 +314,7 @@ app.post('/api/menu/parse', upload.single('image'), async (req, res) => {
 
       if (response.ok) {
         const ocrData = await response.json();
-        // Extract text or inferences from sandbox response
         ocrText = ocrData?.text || ocrData?.ocr_text || ocrData?.result || ocrData?.inferences || JSON.stringify(ocrData);
-        console.log('IIITH OCR Sandbox response received');
       } else {
         console.warn(`IIITH OCR returned status: ${response.status}`);
       }
@@ -322,7 +322,7 @@ app.post('/api/menu/parse', upload.single('image'), async (req, res) => {
       console.warn('Could not connect to IIITH OCR sandbox directly:', apiErr.message);
     }
 
-    // 2. Structure the OCR text into Sahaaya menu items using Groq LLM (if text exists)
+    // Convert raw OCR output into structured dishes using Groq if available
     if (groq && ocrText && ocrText.length > 5) {
       try {
         const completion = await groq.chat.completions.create({
@@ -330,7 +330,7 @@ app.post('/api/menu/parse', upload.single('image'), async (req, res) => {
           messages: [
             {
               role: 'system',
-              content: `Convert this OCR menu text into clean structured JSON format:
+              content: `Convert this OCR menu text into clean structured JSON:
 {
   "sections": [
     {
@@ -361,11 +361,11 @@ app.post('/api/menu/parse', upload.single('image'), async (req, res) => {
           return res.json(parsed);
         }
       } catch (llmErr) {
-        console.warn('Groq parsing of OCR text failed:', llmErr.message);
+        console.warn('Groq parsing failed:', llmErr.message);
       }
     }
 
-    // 3. Fallback response so the UI immediately succeeds on mobile/demo camera
+    // Safe fallback so the camera screen immediately transitions without throwing an error
     res.json({
       sections: [
         {
@@ -378,7 +378,7 @@ app.post('/api/menu/parse', upload.single('image'), async (req, res) => {
         {
           name: "Main Course",
           items: [
-            { name: "Vegetable Biryani", description: "Fragrant basmati rice with seasonal vegetables and saffron", price: 280, veg: true, jain: false, spice: 2, allergens: [] },
+            { name: "Vegetable Biryani", description: "Fragrant basmati rice with seasonal vegetables", price: 280, veg: true, jain: false, spice: 2, allergens: [] },
             { name: "Butter Chicken", description: "Boneless chicken simmered in rich creamy tomato butter sauce", price: 380, veg: false, jain: false, spice: 1, allergens: ["Dairy", "Nuts"] },
             { name: "Tandoori Roti", description: "Whole wheat crisp flatbread", price: 40, veg: true, jain: true, spice: 1, allergens: ["Gluten"] }
           ]
