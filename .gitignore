@@ -1,13 +1,16 @@
 # Dependencies
 node_modules/
+**/node_modules/
 
 # Secrets (API keys: Groq, AnuvaadHub)
 .env
+**/.env
 .env.*
 !.env.example
 
 # Build output
 dist/
+**/dist/
 build/
 .vite/
 *.tsbuildinfo
