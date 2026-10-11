@@ -10,7 +10,10 @@ export const SPEED_LABELS = ["Slow", "Comfortable", "Fast", "Faster"];
 export const STAFF_LANG: Lang = (import.meta.env.VITE_STAFF_LANG as Lang) || "en";
 export const TABLE = 12;
 
-const HTTP = ((import.meta.env.VITE_API_URL as string) || `http://${window.location.hostname}:5000`).replace(/\/$/, "");
+const HTTP = ((import.meta.env.VITE_API_URL as string) || "").replace(/\/$/, "");
+const WS = HTTP
+  ? HTTP.replace(/^http/, "ws")
+  : `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`;
 
 /** Demo-drawer switches. `offline` blocks all calls; `flags` go to the server as X-Sim (e.g. asr_low_confidence). */
 export const sim = { offline: false, flags: new Set<string>() };

@@ -56,7 +56,7 @@ type AppCtx = {
   say: (english: string) => Promise<void>; explain: (text: string) => Promise<void>; simpler: () => Promise<void>; describeTable: (d: TableData) => Promise<void>;
   play: (text: string, lang?: Lang) => Promise<void>; replay: () => void; toStaff: (text: string, phraseId?: string, from?: Lang) => Promise<void>;
   heard: string | null; setHeard: (t: string | null) => void; reply: string | null; setLow: (b: boolean) => void;
-  relay: ReturnType<typeof useRelay>; loadMenu: (f: File | null) => Promise<void>; menuStats: MenuStats | null;
+  relay: ReturnType<typeof useRelay>; loadMenu: (f: File | null) => Promise<boolean>; menuStats: MenuStats | null;
   mic: "idle" | "listening" | "processing"; toggle: () => void; startListening: () => void; stopListening: () => void; openKeypad: () => void;
   dishes: Dish[];
 };
@@ -121,9 +121,9 @@ function Language({ next, onKeypad }: { next: () => void; onKeypad?: () => void 
 }
 function Entry({ go }: { go: (s: Screen) => void }) {
   const { loadMenu, notify, openKeypad } = useApp(); const input = useRef<HTMLInputElement>(null); const [busy, setBusy] = useState(false);
-  const read = async (f: File | null) => { setBusy(true); await loadMenu(f); setBusy(false); go("ready") };
+  const read = async (f: File | null) => { setBusy(true); const ok = await loadMenu(f); setBusy(false); if (ok) go("ready") };
   const opts: [IconName, string, string, () => void][] = [["camera", "Take a photo", "Use camera to photograph the menu", () => go("scan")], ["upload", "Upload an image", "Choose a menu image or PDF from device", () => input.current?.click()], ["menu", "Try sample menu", "Explore with our built-in sample menu", () => read(null)]];
-  return <><main className="content"><input ref={input} type="file" accept="image/*" hidden onChange={e => { const f = e.target.files?.[0]; if (f) read(f) }} /><div className="title"><span className="eyebrow">LET’S BEGIN</span><h1>How do you want to read the menu?</h1><p>We’ll parse it using Groq and OCR so it’s easy to explore.</p></div>{busy && <div className="note success" role="status"><Icon name="menu" /><span><strong>Reading your menu with Groq OCR…</strong><small>Extracting dishes, prices and ingredients</small></span></div>}<div className="entry-list">{opts.map(([i, t, d, act], n) => <button key={t} disabled={busy} onClick={act} className={n === 0 ? "featured" : ""}>{n === 0 && <em>RECOMMENDED</em>}<span className="option-icon"><Icon name={i} /></span><span><strong>{t}</strong><small>{d}</small></span><Icon name="arrow" /></button>)}</div><div className="note success"><Icon name="eye" /><span><strong>Your menu stays private</strong><small>Photos are processed securely and not saved.</small></span></div></main><Conversation user="I’m ready to read the menu." system="Choose how you’d like to begin." /><InputDock phrases={() => go("phrases")} notify={notify} onKeypad={openKeypad} /></>;
+  return <><main className="content"><input ref={input} type="file" accept="image/*" hidden onChange={e => { const f = e.target.files?.[0]; if (f) read(f) }} /><div className="title"><span className="eyebrow">LET’S BEGIN</span><h1>How do you want to read the menu?</h1><p>We’ll parse it using Bhaasha OCR so it’s easy to explore.</p></div>{busy && <div className="note success" role="status"><Icon name="menu" /><span><strong>Reading your menu with Bhaasha OCR…</strong><small>Extracting dishes, prices and ingredients</small></span></div>}<div className="entry-list">{opts.map(([i, t, d, act], n) => <button key={t} disabled={busy} onClick={act} className={n === 0 ? "featured" : ""}>{n === 0 && <em>RECOMMENDED</em>}<span className="option-icon"><Icon name={i} /></span><span><strong>{t}</strong><small>{d}</small></span><Icon name="arrow" /></button>)}</div><div className="note success"><Icon name="eye" /><span><strong>Your menu stays private</strong><small>Photos are processed securely and not saved.</small></span></div></main><Conversation user="I’m ready to read the menu." system="Choose how you’d like to begin." /><InputDock phrases={() => go("phrases")} notify={notify} onKeypad={openKeypad} /></>;
 }
 function Scan({ next }: { next: () => void }) {
   const { loadMenu } = useApp(); const input = useRef<HTMLInputElement>(null);
@@ -133,17 +133,17 @@ function Scan({ next }: { next: () => void }) {
 
   useEffect(() => {
     let stream: MediaStream | null = null;
-    navigator.mediaDevices?.getUserMedia({ video: { facingMode: { ideal: "environment" } } })
+    let cancelled = false;
+    if (!navigator.mediaDevices?.getUserMedia) { console.warn("Live camera needs https or localhost"); return; }
+    navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" } }, audio: false })
       .then(s => {
+        if (cancelled) { s.getTracks().forEach(t => t.stop()); return; }
         stream = s;
-        if (videoRef.current) {
-          videoRef.current.srcObject = s;
-          videoRef.current.play().catch(() => { });
-          setCameraActive(true);
-        }
+        const v = videoRef.current;
+        if (v) { v.srcObject = s; v.play().catch(() => { }); setCameraActive(true); }
       })
       .catch(err => console.warn("Camera access:", err));
-    return () => { stream?.getTracks().forEach(t => t.stop()); };
+    return () => { cancelled = true; stream?.getTracks().forEach(t => t.stop()); };
   }, []);
 
   const capture = async () => {
@@ -157,8 +157,8 @@ function Scan({ next }: { next: () => void }) {
       canvas.toBlob(async blob => {
         if (blob) {
           const file = new File([blob], "camera-menu.jpg", { type: "image/jpeg" });
-          await loadMenu(file);
-          next();
+          const ok = await loadMenu(file);
+          if (ok) next(); else setBusy(false);
         } else {
           setBusy(false);
         }
@@ -168,9 +168,9 @@ function Scan({ next }: { next: () => void }) {
     input.current?.click();
   };
 
-  const onFile = async (f?: File) => { if (!f) return; setBusy(true); await loadMenu(f); next() };
+  const onFile = async (f?: File) => { if (!f) return; setBusy(true); const ok = await loadMenu(f); if (ok) next(); else setBusy(false); };
 
-  return <main className="content scan"><input ref={input} type="file" accept="image/*" capture="environment" hidden onChange={e => onFile(e.target.files?.[0])} /><div className="title"><span className="eyebrow">SCAN MENU</span><h1>Hold still, I’ll guide you</h1></div><div className="viewfinder">{cameraActive ? <video ref={videoRef} autoPlay playsInline muted style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <img src="https://images.unsplash.com/photo-1589302168068-964664d93dc0?auto=format&fit=crop&w=800&q=75" alt="Menu through camera" />}<i /><i /><i /><i /><b>LIVE</b><div><Icon name="alert" /><span><strong>{cameraActive ? "Camera active" : "Position camera"}</strong><small>Point steadily at the printed menu</small></span></div></div><div className="quality"><span><i />Brightness <b>Good</b></span><span><i />Focus <b>Good</b></span></div><Button onClick={capture} icon="camera" className="wide">{busy ? "Extracting menu with Groq OCR…" : "Capture menu"}</Button><button className="text-link" onClick={() => input.current?.click()}><Icon name="upload" />Or choose image from device</button></main>;
+  return <main className="content scan"><input ref={input} type="file" accept="image/*" capture="environment" hidden onChange={e => onFile(e.target.files?.[0])} /><div className="title"><span className="eyebrow">SCAN MENU</span><h1>Hold still, I’ll guide you</h1></div><div className="viewfinder"><video ref={videoRef} autoPlay playsInline muted style={{ width: "100%", height: "100%", objectFit: "cover", display: cameraActive ? "block" : "none" }} />{!cameraActive && <img src="https://images.unsplash.com/photo-1589302168068-964664d93dc0?auto=format&fit=crop&w=800&q=75" alt="Menu through camera" />}<i /><i /><i /><i /><b>LIVE</b><div><Icon name="alert" /><span><strong>{cameraActive ? "Camera active" : "Position camera"}</strong><small>Point steadily at the printed menu</small></span></div></div><div className="quality"><span><i />Brightness <b>Good</b></span><span><i />Focus <b>Good</b></span></div><Button onClick={capture} icon="camera" className="wide">{busy ? "Extracting menu with Bhaasha OCR…" : "Capture menu"}</Button><button className="text-link" onClick={() => input.current?.click()}><Icon name="upload" />Or choose image from device</button></main>;
 }
 const spiceLabel = ["Not spicy", "Mild", "Medium", "Hot", "Spice not stated"];
 const IMG1 = "https://images.unsplash.com/photo-1585937421612-70a008356fbe?auto=format&fit=crop&w=500&q=75", IMG2 = "https://images.unsplash.com/photo-1589302168068-964664d93dc0?auto=format&fit=crop&w=500&q=75";
@@ -374,10 +374,13 @@ export default function App() {
   const run = async (fn: () => Promise<unknown>) => { try { await fn() } catch (e) { notify((e as ApiError)?.userMessage ?? "Something went wrong. Please try again.") } };
   const callWaiter = () => { relay.send("waiter_call", { text: "Waiter requested" }); notify(relay.online ? "Waiter called. They’ll be with you shortly." : "You’re offline. Your call will send when you reconnect.") };
   const applyMenu = (m: ParsedMenu) => { const d = menuToDishes(m); if (!d.length) throw new Error("empty menu"); setDishes(d); setCart({}); setMenuStats({ items: d.length, sections: m.sections.length, unclear: m.unclear?.length ?? d.filter(x => x.price === 0).length }); setMenuVer(v => v + 1) };
-  const loadMenu = async (file: File | null) => {
-    try { applyMenu(file ? await parseMenu(file, langs.o) : await sampleMenu()); return } catch {/* fall through to sample menu */ }
-    if (file) { try { applyMenu(await sampleMenu()); notify("I couldn’t read that photo, so I’m showing the sample menu."); return } catch {/* fallback */ } }
-    setDishes(demoDishes); setCart({}); setMenuStats(null); setMenuVer(v => v + 1); notify("Showing demo menu.");
+  const loadMenu = async (file: File | null): Promise<boolean> => {
+    if (!file) {
+      try { applyMenu(await sampleMenu()); return true } catch {/* fall through to demo */ }
+      setDishes(demoDishes); setCart({}); setMenuStats(null); setMenuVer(v => v + 1); notify("Showing demo menu."); return true;
+    }
+    try { applyMenu(await parseMenu(file, "en")); return true }
+    catch (e) { notify((e as ApiError)?.userMessage ?? "I couldn’t read that menu. Try a clear, flat photo of the menu text."); return false }
   };
 
   // 5th page: update food descriptions to match selected language using Groq
