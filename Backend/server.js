@@ -142,63 +142,71 @@ app.get('/health', (req, res) => {
   });
 });
 
-/* ───────────────────────── 1. ASR ───────────────────────── */
+
+/* ───────────────────────── 1. ASR with Intent Translation ───────────────────────── */
 
 app.post('/api/asr', upload.single('audio'), async (req, res) => {
   try {
     const language = req.body.language || req.body.lang || 'en';
     const audioBuffer = req.file?.buffer;
 
-    const sim = String(req.headers['x-sim'] || '');
-    if (req.headers['x-sim-low-confidence'] || sim.includes('low_confidence')) {
-      return res.json({ text: '', confidence: 0.2, lowConfidence: true, lang: language });
-    }
-
     if (!audioBuffer) {
-      return apiError(res, 400, 'no_audio', 'No audio provided.');
+      return res.status(400).json({ error: { code: 'no_audio', userMessage: 'No audio provided.' } });
     }
 
+    let detectedText = '';
+
+    // 1. Transcribe audio using Whisper
     if (groq) {
       try {
-        const file = await toFile(audioBuffer, 'audio.webm', { type: req.file?.mimetype || 'audio/webm' });
+        const file = await toFile(audioBuffer, 'speech.webm', { type: req.file?.mimetype || 'audio/webm' });
         const transcription = await groq.audio.transcriptions.create({
           file,
           model: 'whisper-large-v3-turbo',
           language: ['hi', 'te'].includes(language) ? language : 'en'
         });
-        if (transcription?.text) {
-          return res.json({ text: transcription.text.trim(), confidence: 0.95, lowConfidence: false, lang: language });
-        }
+        detectedText = transcription?.text?.trim() || '';
       } catch (whisperErr) {
-        console.warn('Groq Whisper error, trying Dhruva ASR:', whisperErr.message);
+        console.warn('Whisper ASR error:', whisperErr.message);
       }
     }
 
-    if (process.env.ANUVAADHUB_API_KEY) {
-      const model = MODEL_MAPPING.asr[language] || MODEL_MAPPING.asr.en;
-      const response = await fetch(`${DHRUVA_BASE}/asr`, {
-        method: 'POST',
-        headers: getAnuvaadHeaders(),
-        body: JSON.stringify({
-          config: {
-            language: { sourceLanguage: language },
-            serviceId: model
-          },
-          audio: [{ audioContent: audioBuffer.toString('base64') }]
-        })
-      });
+    if (!detectedText) {
+      return res.json({ text: '', englishText: '', confidence: 0, lowConfidence: true, lang: language });
+    }
 
-      if (response.ok) {
-        const data = await response.json();
-        const text = data?.output?.[0]?.source || data?.pipelineResponse?.[0]?.output?.[0]?.source || '';
-        return res.json({ text, confidence: 0.95, lowConfidence: !text, lang: language });
+    // 2. If the user spoke in Hindi or Telugu, get the English equivalent for business logic
+    let englishIntentText = detectedText;
+    if (language !== 'en' && groq) {
+      try {
+        const translationRes = await groq.chat.completions.create({
+          model: 'llama-3.3-70b-versatile',
+          messages: [
+            {
+              role: 'system',
+              content: 'Translate the following dining/restaurant speech query into concise English command text. Output ONLY the translated English text.'
+            },
+            { role: 'user', content: detectedText }
+          ],
+          temperature: 0.1
+        });
+        englishIntentText = translationRes.choices[0]?.message?.content?.trim() || detectedText;
+      } catch (transErr) {
+        console.warn('Command translation failed:', transErr.message);
       }
     }
 
-    res.json({ text: 'One palak paneer and water please', confidence: 0.9, lowConfidence: false, lang: language });
+    // Return BOTH: native text for display, and englishText for triggering actions
+    res.json({
+      text: detectedText,
+      englishText: englishIntentText,
+      confidence: 0.95,
+      lowConfidence: false,
+      lang: language
+    });
   } catch (error) {
-    console.error('ASR failed:', error);
-    apiError(res, 500, 'asr_failed', 'Speech recognition failed. Please try again.', true, error.message);
+    console.error('ASR error:', error);
+    res.status(500).json({ error: { code: 'asr_failed', userMessage: 'Speech recognition failed.' } });
   }
 });
 
