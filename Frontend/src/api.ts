@@ -70,7 +70,8 @@ async function request<T>(path: string, init: Opts = {}): Promise<T> {
       last = await toError(res);
     } catch (e) {
       last = {
-        code: (e as Error).name === "AbortError" ? "timeout" : "network", retryable: true,
+        code: (e as Error).name === "AbortError" ? "timeout" : "network", 
+        retryable: true,
         userMessage: "Couldn’t reach the server. Please try again.",
       };
     } finally { clearTimeout(timer); }
@@ -218,7 +219,7 @@ export function openRelay(o: {
   };
   function connect() {
     if (closed) return;
-    ws = new WebSocket(`${ws}/relay?table=${o.table}&role=${o.role}&lang=${o.lang}&since=${lastTs}`);
+    ws = new WebSocket(`${WS}/relay?table=${o.table}&role=${o.role}&lang=${o.lang}&since=${lastTs}`);
     ws.onopen = () => { tries = 0; o.onStatus(true); while (queue.length) ws!.send(JSON.stringify(queue.shift())); };
     ws.onmessage = e => {
       try { const m = JSON.parse(e.data) as RelayMsg; lastTs = Math.max(lastTs, m.ts ?? 0); o.onMessage(m); } catch { /* ignore bad frame */ }
