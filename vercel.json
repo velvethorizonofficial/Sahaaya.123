@@ -6,15 +6,7 @@
     },
     "frontend": {
       "root": "Frontend",
-      "framework": "vite",
-      "bindings": [
-        {
-          "type": "service",
-          "service": "backend",
-          "format": "url",
-          "env": "BACKEND_SERVICE_URL"
-        }
-      ]
+      "framework": "vite"
     }
   },
   "rewrites": [
